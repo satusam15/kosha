@@ -86,21 +86,45 @@ def ocr_image(path_str: str) -> str:
 
 
 def search_docs(query: str, top_k: int = 3) -> str:
-    """Search the local document corpus (RAG) and return top-k cited chunks."""
+    """Search the local document corpus (RAG) AND remembered facts, and
+    return top-k cited results from each, clearly labeled by source."""
+    doc_lines: list[str] = []
     try:
         from backend.rag.retrieve import retrieve
 
         hits = retrieve(query, top_k=top_k)
-        if not hits:
-            return "[search] no relevant chunks found in the local corpus."
-        lines = []
         for i, hit in enumerate(hits, 1):
-            lines.append(
+            doc_lines.append(
                 f"{i}. [doc={hit['doc']} page={hit['page']}] {hit['text'][:400]}"
             )
-        return "[search] top results:\n" + "\n".join(lines)
     except Exception as exc:  # noqa: BLE001 - degrade gracefully
-        return f"[search] index unavailable: {exc}"
+        doc_lines.append(f"[document index unavailable: {exc}]")
+
+    memory_lines: list[str] = []
+    try:
+        from backend.memory.store import search_memory
+
+        for i, fact in enumerate(search_memory(query, top_k=top_k), 1):
+            memory_lines.append(
+                f"{i}. {fact['subject']} {fact['predicate']} {fact['object']}"
+                f" (remembered {fact['created_at'][:10]})"
+            )
+    except Exception as exc:  # noqa: BLE001 - degrade gracefully
+        memory_lines.append(f"[memory unavailable: {exc}]")
+
+    if not doc_lines and not memory_lines:
+        return "[search] no relevant chunks found in the local corpus, and no matching remembered facts."
+
+    parts = []
+    parts.append(
+        "[search] top document results:\n" + "\n".join(doc_lines)
+        if doc_lines else "[search] no relevant document chunks found."
+    )
+    parts.append(
+        "[search] remembered facts:\n" + "\n".join(memory_lines)
+        if memory_lines else "[search] no remembered facts match."
+    )
+    return "\n\n".join(parts)
 
 
 def run_code(code: str) -> str:

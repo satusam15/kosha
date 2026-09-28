@@ -23,10 +23,11 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-from backend.router.model_router import Route, route_task, stream_chat
+from backend.router.model_router import Route, route_task, stream_chat, OLLAMA_BASE_URL
 from backend.agent.tools import describe_tools, run_tool
 
 # ---------------------------------------------------------------------------
@@ -102,6 +103,8 @@ class AgentResult:
     steps: list[AgentStep] = field(default_factory=list)
     iterations: int = 0
     routed: Optional[Route] = None
+    task_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    saved_facts: list[dict] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +215,26 @@ def _normalize_generate_deliverable_args(action: dict) -> dict:
     return action
 
 
+def _save_task_memory(result: "AgentResult", user_message: str) -> None:
+    """Checkpoint 1: persist durable facts from this task to SQLite, once
+    per task, right before returning. Never lets a memory failure surface
+    to the caller -- extract_and_save_facts already swallows its own
+    errors, and the model name is read defensively in case routing failed.
+    """
+    try:
+        from backend.memory.store import extract_and_save_facts
+
+        model = result.routed.model if result.routed else None
+        if not model:
+            return
+        result.saved_facts = extract_and_save_facts(
+            user_message, result.answer,
+            model=model, base_url=OLLAMA_BASE_URL, task_id=result.task_id,
+        )
+    except Exception:  # noqa: BLE001 - memory is best-effort, never fatal
+        result.saved_facts = []
+
+
 # ---------------------------------------------------------------------------
 # The loop
 # ---------------------------------------------------------------------------
@@ -266,6 +289,7 @@ def run_agent(
             # The model answered without needing a tool -> we are done.
             result.steps.append(AgentStep(kind="final", content=plan))
             result.answer = plan
+            _save_task_memory(result, user_message)
             return result
 
         tool_name = action["tool"]
@@ -315,4 +339,5 @@ def run_agent(
         f"[stopped] reached max iterations ({max_iterations}) before a final "
         "answer. Last model text was appended to the trace."
     )
+    _save_task_memory(result, user_message)
     return result

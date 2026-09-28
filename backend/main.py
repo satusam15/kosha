@@ -10,6 +10,7 @@ Endpoints:
     GET  /health               backend + Ollama reachability
     POST /index/build          build/rebuild the RAG index from data/sops
     GET  /retrieve             quick RAG retrieval for debugging
+    GET  /memory               list/search persistent memory (facts/entities/relations)
     GET  /sandbox              sandbox health
     GET  /ocr?path=...         extract text from an image / scanned pdf
     POST /upload                upload an image/PDF, get back a path for /chat
@@ -65,6 +66,8 @@ class ChatResponse(BaseModel):
     task_type: str
     iterations: int
     steps: list[dict]
+    task_id: str
+    saved_facts: list[dict]
 
 
 class BuildIndexResponse(BaseModel):
@@ -122,6 +125,8 @@ def chat(req: ChatRequest):
         task_type=result.routed.task_type if result.routed else "unknown",
         iterations=result.iterations,
         steps=steps,
+        task_id=result.task_id,
+        saved_facts=result.saved_facts,
     )
 
 
@@ -160,6 +165,22 @@ def retrieve(q: str = Query(..., min_length=1), top_k: int = 3):
         return {"hits": _retrieve(q, top_k=top_k)}
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Persistent memory (facts / entities / relations)
+# ---------------------------------------------------------------------------
+@app.get("/memory")
+def memory(q: str = Query("", description="leave empty to list recent facts")):
+    from backend.memory import store as memory_store
+
+    if q.strip():
+        return {"hits": memory_store.search_memory(q)}
+    return {
+        "facts": memory_store.all_facts(),
+        "entities": memory_store.all_entities(),
+        "relations": memory_store.all_relations(),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -5,3 +5,4 @@ data/rag_index/
 backend/workspace/uploads/
 backend/workspace/deliverables/
 .DS_Store
+data/memory.db
