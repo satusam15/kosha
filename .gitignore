@@ -7,3 +7,4 @@ backend/workspace/deliverables/
 .DS_Store
 data/memory.db
 backend/workspace/logs/
+data/approvals.db

@@ -11,6 +11,9 @@ Endpoints:
     POST /index/build          build/rebuild the RAG index from data/sops
     GET  /retrieve             quick RAG retrieval for debugging
     GET  /memory               list/search persistent memory (facts/entities/relations)
+    GET  /approvals            list pending/approved/rejected side-effect actions
+    POST /approvals/{id}/approve   actually run a queued action
+    POST /approvals/{id}/reject    permanently discard a queued action
     GET  /sandbox              sandbox health
     GET  /ocr?path=...         extract text from an image / scanned pdf
     POST /upload                upload an image/PDF, get back a path for /chat
@@ -21,6 +24,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
+from typing import Optional
 
 import ollama
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -181,6 +185,36 @@ def memory(q: str = Query("", description="leave empty to list recent facts")):
         "entities": memory_store.all_entities(),
         "relations": memory_store.all_relations(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Approval queue for side-effecting agent actions (checkpoint 5)
+# ---------------------------------------------------------------------------
+@app.get("/approvals")
+def list_approvals(status: Optional[str] = Query(None, description="pending|approved|rejected")):
+    from backend.approvals.store import list_approvals as _list
+
+    return {"approvals": _list(status)}
+
+
+@app.post("/approvals/{approval_id}/approve")
+def approve(approval_id: int):
+    from backend.approvals.store import decide
+
+    try:
+        return decide(approval_id, approve=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/approvals/{approval_id}/reject")
+def reject(approval_id: int):
+    from backend.approvals.store import decide
+
+    try:
+        return decide(approval_id, approve=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

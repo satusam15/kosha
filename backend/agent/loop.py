@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from backend.router.model_router import Route, route_task, stream_chat, OLLAMA_BASE_URL
-from backend.agent.tools import describe_tools, run_tool
+from backend.agent.tools import describe_tools, run_tool, SIDE_EFFECT_TOOLS
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -229,6 +229,33 @@ def _record_step(result: "AgentResult", kind: str, content: str, *,
         pass
 
 
+def _dispatch_tool(task_id: str, tool_name: str, args_json: str) -> str:
+    """Run a tool -- unless it's side-effecting (checkpoint 5), in which
+    case queue it for human approval instead of executing it. The queued
+    observation is deliberately blunt about nothing having happened yet,
+    since a small model will otherwise happily narrate success it never
+    produced."""
+    if tool_name not in SIDE_EFFECT_TOOLS:
+        return run_tool(tool_name, args_json)
+
+    from backend.approvals.store import create_approval
+
+    approval_id = create_approval(task_id, tool_name, args_json)
+    try:
+        from backend.agent.execlog import log_step
+
+        log_step(task_id, 0, "approval_requested", args_json, tool=tool_name)
+    except Exception:  # noqa: BLE001 - logging must never break the task
+        pass
+    return (
+        f"[pending approval] {tool_name} was NOT executed. It requires human "
+        f"approval first (approval id: {approval_id}). Nothing has been "
+        "created yet. Tell the user this action is waiting for their "
+        "approval -- do not claim it succeeded or describe its contents as "
+        "if the file already exists."
+    )
+
+
 def _save_task_memory(result: "AgentResult", user_message: str) -> None:
     """Checkpoint 1: persist durable facts from this task to SQLite, once
     per task, right before returning. Never lets a memory failure surface
@@ -313,7 +340,7 @@ def run_agent(
                      tool=tool_name, args=args)
 
         # --- ACT + OBSERVE ---
-        observation = run_tool(tool_name, args_json)
+        observation = _dispatch_tool(result.task_id, tool_name, args_json)
         _record_step(result, "observation", observation[:2000])
 
         # Greedy decoding is deterministic: if the exact same call is retried

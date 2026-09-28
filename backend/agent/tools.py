@@ -198,6 +198,14 @@ class Tool:
         return out if isinstance(out, str) else json.dumps(out, default=str)
 
 
+# Tools whose effects reach outside the conversation (writing a real file
+# the user will actually open/use) and therefore require human approval
+# before they run -- see backend/approvals/store.py and the gate in
+# backend/agent/loop.py. Read-only tools (search_docs, ocr_image, read_file)
+# and the sandboxed run_code (contained by Docker --network none, produces
+# no persistent output of its own) are deliberately not gated.
+SIDE_EFFECT_TOOLS = {"generate_deliverable", "write_file"}
+
 # Tool registry the agent uses by name.
 TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("read_file", "Read a file from the workspace.", '{"path_str": "string"}', read_file),
