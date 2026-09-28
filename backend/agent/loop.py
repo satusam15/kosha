@@ -90,7 +90,7 @@ You may take up to {max_iter} steps. Be concise but complete.
 class AgentStep:
     """A single logged step in the agent trace."""
 
-    kind: str          # "thought" | "action" | "observation" | "final" | "stopped"
+    kind: str          # "thought" | "action" | "observation" | "final"
     content: str
     tool: Optional[str] = None
     args: Optional[dict] = None
@@ -256,6 +256,118 @@ def _dispatch_tool(task_id: str, tool_name: str, args_json: str) -> str:
     )
 
 
+_FILE_REF_RE = re.compile(r"^File:\s*(\S+)", re.MULTILINE)
+
+
+def _preread_attached_file(user_message: str) -> str:
+    """If the message references an attached file (the frontend sends
+    "File: <path>\\n<question>"; so does most of our own testing), OCR it
+    up front and fold the text directly into the message. Otherwise a
+    simple "what does this say?" question forces the model to remember to
+    call ocr_image itself before it can answer anything -- an extra step
+    that a small model does not reliably get right, and unnecessary when
+    we can just read the file ourselves before the loop even starts.
+
+    Best-effort: any failure (bad path, unreadable file) just returns the
+    original message unchanged, so the agent can still fall back to
+    calling ocr_image itself as before.
+    """
+    m = _FILE_REF_RE.search(user_message)
+    if not m:
+        return user_message
+    path_str = m.group(1)
+    try:
+        from backend.agent.tools import ocr_image
+
+        extracted = ocr_image(path_str)
+    except Exception:  # noqa: BLE001 - degrade to the old call-it-yourself path
+        return user_message
+    if extracted.startswith("[error]"):
+        return user_message
+    return (
+        f"{user_message}\n\n"
+        "[The attached file has already been read for you -- you do NOT "
+        "need to call ocr_image again unless you need to read a DIFFERENT "
+        f"file]:\n{extracted}"
+    )
+
+
+# Keyword signal for "this question needs the SOP corpus or another tool,
+# not just the text we already read" -- mirrors the existing keyword-based
+# routing pattern in backend/router/model_router.py. A plain summary /
+# extraction question about the attached file (the common case) matches
+# none of these and gets answered directly, skipping the ReAct loop.
+_TOOL_NEEDED_KEYWORDS = [
+    "sop", "policy", "policies", "compliance", "threshold", "escalat",
+    "approval note", "generate", "deliverable", "calc_sheet", "calc sheet",
+    "presentation", "risk assessment", "recommend", "search the docs",
+    "severity", "against our", "approve",
+]
+
+
+def _needs_agent_loop(question: str) -> bool:
+    lowered = question.lower()
+    return any(k in lowered for k in _TOOL_NEEDED_KEYWORDS)
+
+
+def _answer_from_context_only(route: Route, augmented_message: str) -> str:
+    """Fast path for a plain summary/extraction question about an attached
+    file whose OCR text is already folded into `augmented_message`: answer
+    with a single completion call, skipping the ReAct tool-calling loop
+    (and its protocol/latency overhead) entirely. Only used when the
+    question doesn't need the SOP or any other tool -- see
+    _needs_agent_loop.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are Kosh, a local, offline-first assistant. Answer the "
+                "user's question directly and factually using only the "
+                "document text provided in their message. Do not invent "
+                "information that is not present in that text."
+            ),
+        },
+        {"role": "user", "content": augmented_message},
+    ]
+    text = ""
+    for chunk in stream_chat(route.model, messages):
+        text += chunk
+    return text.strip()
+
+
+def _force_final_answer(route: Route, messages: list[dict], fallback: str) -> str:
+    """One last completion call with tool-calling effectively disabled via
+    instruction: answer now, in plain text, from whatever is already in
+    context. Used both when the agent repeats an identical tool call and
+    when it hits the iteration cap -- the user must never see a bare
+    "[stopped]"/internal-status string; they get the model's best attempt
+    at answering from what was actually gathered, or `fallback` if even
+    this call produces nothing usable.
+    """
+    stop_messages = messages + [{
+        "role": "user",
+        "content": (
+            "STOP calling tools. Using ONLY the information already "
+            "gathered in this conversation above, answer the user's "
+            "original question right now as a plain paragraph. Do not "
+            "emit an ACTION block."
+        ),
+    }]
+    text = ""
+    try:
+        for chunk in stream_chat(route.model, stop_messages):
+            text += chunk
+    except Exception:  # noqa: BLE001 - never let the forced call itself crash the task
+        text = ""
+    text = text.strip()
+    # This call must always end the task, even if the model ignores the
+    # instruction and emits another ACTION block anyway -- strip it so no
+    # half-formed action can leak into the user-facing answer.
+    stripped = _ACTION_RE.sub("", text).strip()
+    return stripped or text or fallback
+
+
 def _save_task_memory(result: "AgentResult", user_message: str) -> None:
     """Checkpoint 1: persist durable facts from this task to SQLite, once
     per task, right before returning. Never lets a memory failure surface
@@ -297,6 +409,31 @@ def run_agent(
     route = route_task(user_message, has_upload=has_upload)
     result = AgentResult(routed=route, iterations=0)
 
+    # Pre-read any attached file so simple questions can be answered
+    # directly instead of depending on the model remembering to call
+    # ocr_image itself. `user_message` (unaugmented) is what memory
+    # extraction sees later -- only the model's own context gets the OCR
+    # text.
+    augmented_message = _preread_attached_file(user_message)
+    ocr_was_injected = augmented_message != user_message
+
+    # Fast path: a plain summary/extraction question about a file we just
+    # read, that doesn't need the SOP corpus or any other tool -- skip the
+    # ReAct loop (and its JSON-protocol/tool-description overhead)
+    # entirely and answer in one completion call.
+    if ocr_was_injected and not _needs_agent_loop(user_message):
+        result.iterations = 1
+        answer = _answer_from_context_only(route, augmented_message)
+        _record_step(
+            result, "thought",
+            "Question is a plain summary/extraction over an already-read "
+            "attachment; answering directly without the tool-calling loop.",
+        )
+        _record_step(result, "final", answer)
+        result.answer = answer
+        _save_task_memory(result, user_message)
+        return result
+
     messages: list[dict] = list(history or [])
     if not messages or messages[0].get("role") != "system":
         messages.insert(
@@ -308,7 +445,7 @@ def run_agent(
                 ),
             },
         )
-    messages.append({"role": "user", "content": user_message})
+    messages.append({"role": "user", "content": augmented_message})
 
     last_action_signature: Optional[str] = None
 
@@ -355,28 +492,14 @@ def run_agent(
         messages.append({"role": "assistant", "content": plan[:2000]})
 
         if is_repeat:
-            messages.append({
-                "role": "user",
-                "content": f"OBSERVATION:\n{observation}\n\n"
-                           "STOP. You just repeated the exact same tool call "
-                           "with the exact same arguments -- it will fail the "
-                           "same way again. Do not call any tool again. Using "
-                           "ONLY the information already gathered above, give "
-                           "your best final answer right now as a plain "
-                           "paragraph. Do not emit an ACTION block.",
-            })
-            final_text = ""
-            for chunk in stream_chat(route.model, messages):
-                final_text += chunk
-            final_text = final_text.strip()
-            # This call must always end the task, even if the model ignores
-            # the instruction and emits another ACTION block anyway -- strip
-            # it so no half-formed action can leak into the loop or the
-            # user-facing answer.
-            stripped = _ACTION_RE.sub("", final_text).strip()
-            final_text = stripped or final_text or (
-                "[stopped] repeated the same tool call twice and produced no "
-                "usable final answer."
+            messages.append({"role": "user", "content": f"OBSERVATION:\n{observation}"})
+            final_text = _force_final_answer(
+                route, messages,
+                fallback=(
+                    "I wasn't able to complete this fully, but here is what I "
+                    f"found before running into a repeated issue with {tool_name}: "
+                    + observation[:500]
+                ),
             )
             _record_step(result, "final", final_text)
             result.answer = final_text
@@ -393,11 +516,17 @@ def run_agent(
             }
         )
 
-    # Loop exhausted without an explicit final answer.
-    result.answer = (
-        f"[stopped] reached max iterations ({max_iterations}) before a final "
-        "answer. Last model text was appended to the trace."
+    # Loop exhausted without an explicit final answer -- force one rather
+    # than surface an internal "[stopped]" status to the user.
+    final_text = _force_final_answer(
+        route, messages,
+        fallback=(
+            "I gathered some information but was not able to reach a "
+            "complete answer in the time available. Please try rephrasing "
+            "the question or asking for less at once."
+        ),
     )
-    _record_step(result, "stopped", result.answer)
+    _record_step(result, "final", final_text)
+    result.answer = final_text
     _save_task_memory(result, user_message)
     return result
