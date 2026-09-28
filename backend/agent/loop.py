@@ -90,7 +90,7 @@ You may take up to {max_iter} steps. Be concise but complete.
 class AgentStep:
     """A single logged step in the agent trace."""
 
-    kind: str          # "plan" | "action" | "observation" | "final"
+    kind: str          # "thought" | "action" | "observation" | "final" | "stopped"
     content: str
     tool: Optional[str] = None
     args: Optional[dict] = None
@@ -215,6 +215,20 @@ def _normalize_generate_deliverable_args(action: dict) -> dict:
     return action
 
 
+def _record_step(result: "AgentResult", kind: str, content: str, *,
+                  tool: Optional[str] = None, args: Optional[dict] = None) -> None:
+    """Append a step to the in-memory trace AND the durable JSONL log
+    (checkpoint 4), in one place, so every step is captured exactly once
+    and the two can never drift out of sync."""
+    result.steps.append(AgentStep(kind=kind, content=content, tool=tool, args=args))
+    try:
+        from backend.agent.execlog import log_step
+
+        log_step(result.task_id, len(result.steps), kind, content, tool=tool, args=args)
+    except Exception:  # noqa: BLE001 - logging must never break the task
+        pass
+
+
 def _save_task_memory(result: "AgentResult", user_message: str) -> None:
     """Checkpoint 1: persist durable facts from this task to SQLite, once
     per task, right before returning. Never lets a memory failure surface
@@ -275,19 +289,19 @@ def run_agent(
     for iteration in range(max_iterations):
         result.iterations = iteration + 1
 
-        # --- PLAN: stream the model's response ---
+        # --- THOUGHT: stream the model's response ---
         plan_parts: list[str] = []
         for chunk in stream_chat(route.model, messages):
             plan_parts.append(chunk)
         plan = "".join(plan_parts).strip()
 
         # Store a compact plan trace (avoid storing the full model text twice).
-        result.steps.append(AgentStep(kind="plan", content=plan[:2000]))
+        _record_step(result, "thought", plan[:2000])
 
         action = _extract_action(plan)
         if action is None:
             # The model answered without needing a tool -> we are done.
-            result.steps.append(AgentStep(kind="final", content=plan))
+            _record_step(result, "final", plan)
             result.answer = plan
             _save_task_memory(result, user_message)
             return result
@@ -295,14 +309,12 @@ def run_agent(
         tool_name = action["tool"]
         args = action.get("args", {})
         args_json = json.dumps(args, default=str)
-        result.steps.append(
-            AgentStep(kind="action", content=f"{tool_name}({args_json})",
-                      tool=tool_name, args=args)
-        )
+        _record_step(result, "action", f"{tool_name}({args_json})",
+                     tool=tool_name, args=args)
 
         # --- ACT + OBSERVE ---
         observation = run_tool(tool_name, args_json)
-        result.steps.append(AgentStep(kind="observation", content=observation[:2000]))
+        _record_step(result, "observation", observation[:2000])
 
         # Greedy decoding is deterministic: if the exact same call is retried
         # after failing, it will just fail identically forever. Detect that
@@ -339,5 +351,6 @@ def run_agent(
         f"[stopped] reached max iterations ({max_iterations}) before a final "
         "answer. Last model text was appended to the trace."
     )
+    _record_step(result, "stopped", result.answer)
     _save_task_memory(result, user_message)
     return result
