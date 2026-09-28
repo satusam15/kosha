@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kavach</title>
+<style>
+  :root{
+    --bg:#f7f6f1; --surface:#ffffff; --surface-alt:#f0efe7;
+    --border:#e5e2d8; --border-strong:#d6d2c4;
+    --text:#2b2a26; --text-muted:#6b6a61; --text-faint:#9c9a8d;
+    --accent:#b6552f; --accent-fg:#ffffff; --accent-soft:#f2e2d6;
+    --ok:#4f7d5c; --radius:8px; --radius-lg:12px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#18181a; --surface:#1f1f21; --surface-alt:#242426;
+      --border:#333335; --border-strong:#414143;
+      --text:#e9e8e4; --text-muted:#9a988f; --text-faint:#6c6a62;
+      --accent:#d17a4f; --accent-fg:#18181a; --accent-soft:#3a2a20;
+      --ok:#6fa17e;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family:var(--font); font-size:14px; line-height:1.5;
+    background:var(--bg); color:var(--text);
+    display:flex; flex-direction:column;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  header{
+    padding:12px 20px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between;
+    flex-shrink:0;
+  }
+  header .brand{display:flex; align-items:center; gap:8px; font-size:14.5px; font-weight:600; letter-spacing:-.01em}
+  header .brand .logo{color:var(--accent); flex-shrink:0}
+
+  .layout{display:flex; flex:1; min-height:0}
+
+  /* LEFT: history */
+  #history{
+    width:220px; border-right:1px solid var(--border);
+    padding:16px 12px; overflow-y:auto;
+    display:flex; flex-direction:column; gap:6px; flex-shrink:0;
+  }
+  #history h2{
+    font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--text-faint); margin:0 8px 6px;
+  }
+  .hist-item{
+    border-radius:var(--radius); padding:8px 8px; font-size:12.5px;
+    cursor:default; color:var(--text-muted);
+    transition:background .12s ease;
+  }
+  .hist-item:hover{background:var(--surface-alt)}
+  .hist-item .q{
+    color:var(--text); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+  .hist-item small{display:block; color:var(--text-faint); margin-top:2px; font-size:11px}
+
+  /* CENTER */
+  #center{flex:1; display:flex; flex-direction:column; min-width:0}
+  #tabs{display:flex; gap:2px; padding:10px 20px 0; border-bottom:1px solid var(--border)}
+  #tabs button{
+    background:transparent; border:none; color:var(--text-muted);
+    padding:8px 4px; margin-right:20px; cursor:pointer; font-size:13px; font-family:inherit;
+    border-bottom:2px solid transparent; margin-bottom:-1px;
+  }
+  #tabs button.active{color:var(--text); border-bottom-color:var(--accent); font-weight:600}
+
+  #chat{flex:1; overflow-y:auto; padding:24px 28px; display:none}
+  #chat.active{display:block}
+  #steps{flex:1; overflow-y:auto; padding:20px 28px; display:none; font-family:var(--font-mono); font-size:12px}
+  #steps.active{display:block}
+
+  .msg{margin-bottom:22px; max-width:680px}
+  .msg .who{font-size:11px; font-weight:600; color:var(--text-faint); margin-bottom:5px; text-transform:uppercase; letter-spacing:.04em}
+  .msg.user{margin-left:auto; max-width:520px}
+  .msg.user .bubble{
+    background:var(--accent-soft); border-radius:var(--radius-lg);
+    padding:10px 14px; white-space:pre-wrap;
+  }
+  .msg.assistant .bubble{white-space:pre-wrap}
+  .msg.assistant.error .bubble{color:var(--accent)}
+
+  .step-line{padding:8px 0 8px 12px; border-left:2px solid var(--border); margin-bottom:2px}
+  .step-line .lbl{font-weight:600; margin-bottom:3px; font-size:11px; letter-spacing:.03em; color:var(--text-faint)}
+  .step-line.action .lbl{color:var(--accent)}
+  .step-line.final .lbl{color:var(--ok)}
+  .step-line pre{margin:0; white-space:pre-wrap; color:var(--text-muted); font-size:12px; line-height:1.5}
+
+  /* RIGHT: deliverables */
+  #preview{width:300px; border-left:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0}
+  #preview h2{
+    font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--text-faint); padding:16px 16px 10px; margin:0;
+  }
+  #preview-body{flex:1; overflow-y:auto; padding:0 12px 16px}
+  .dlv-item{
+    display:flex; align-items:flex-start; gap:9px;
+    border-radius:var(--radius); padding:9px 8px; margin-bottom:2px;
+  }
+  .dlv-item svg{flex-shrink:0; margin-top:2px; color:var(--text-faint)}
+  .dlv-item .name{font-size:12.5px; color:var(--text); word-break:break-word}
+  .dlv-item a{color:inherit; text-decoration:none}
+  .dlv-item a:hover .name{text-decoration:underline}
+  .dlv-item small{display:block; color:var(--text-faint); margin-top:2px; font-size:11px}
+
+  .empty{color:var(--text-faint); font-size:13px; padding-top:4px}
+
+  /* COMPOSER */
+  #composer-wrap{padding:16px 20px 20px; flex-shrink:0}
+  #attachbar{display:none; align-items:center; gap:8px; margin-bottom:8px}
+  #attachbar.active{display:flex}
+  #attach-chip{
+    display:flex; align-items:center; gap:7px;
+    background:var(--surface-alt); border:1px solid var(--border); border-radius:var(--radius);
+    padding:5px 8px 5px 10px; font-size:12px; color:var(--text);
+  }
+  #attach-chip svg{color:var(--text-faint); flex-shrink:0}
+  #attach-chip .x{cursor:pointer; color:var(--text-faint); display:flex; padding:2px; border-radius:4px}
+  #attach-chip .x:hover{color:var(--text); background:var(--border)}
+
+  #composer{
+    display:flex; align-items:flex-end; gap:6px;
+    background:var(--surface); border:1px solid var(--border-strong); border-radius:var(--radius-lg);
+    padding:8px 8px 8px 10px;
+    transition:border-color .12s ease;
+  }
+  #composer:focus-within{border-color:var(--accent)}
+  #attachbtn, #send{
+    background:transparent; border:none; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    width:32px; height:32px; border-radius:var(--radius);
+    color:var(--text-muted); flex-shrink:0;
+  }
+  #attachbtn:hover{background:var(--surface-alt); color:var(--text)}
+  #send{background:var(--accent); color:var(--accent-fg)}
+  #send:hover{opacity:.9}
+  #send:disabled{opacity:.4; cursor:not-allowed}
+  #input{
+    flex:1; resize:none; background:transparent; color:var(--text);
+    border:none; outline:none; font:inherit; font-size:14px;
+    padding:6px 4px; max-height:160px; line-height:1.45;
+  }
+  #input::placeholder{color:var(--text-faint)}
+
+  #status{font-size:12px; color:var(--text-faint); padding:0 20px 8px; height:16px}
+
+  /* Fixed-width side panels only make sense once there's room for the
+     center column too -- degrade them before #center gets squeezed out. */
+  @media (max-width: 900px){
+    #history{width:170px}
+    #preview{width:220px}
+  }
+  @media (max-width: 680px){
+    #history, #preview{display:none}
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">
+    <svg class="logo" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 L4 5.2 V11 C4 16.4 7.4 20.9 12 22.5 C16.6 20.9 20 16.4 20 11 V5.2 Z"/></svg>
+    Kavach
+  </span>
+</header>
+
+<div class="layout">
+  <aside id="history">
+    <h2>History</h2>
+    <div id="hist-list"></div>
+  </aside>
+
+  <main id="center">
+    <div id="tabs">
+      <button id="tab-chat" class="active">Chat</button>
+      <button id="tab-steps">Agent steps</button>
+    </div>
+    <div id="chat" class="active">
+      <div class="empty">Ask a question, or attach a file to analyze it.</div>
+    </div>
+    <div id="steps"></div>
+  </main>
+
+  <aside id="preview">
+    <h2>Deliverables</h2>
+    <div id="preview-body">
+      <div class="empty">Generated files will appear here.</div>
+    </div>
+  </aside>
+</div>
+
+<div id="status"></div>
+<div id="composer-wrap">
+  <div id="attachbar">
+    <div id="attach-chip"></div>
+  </div>
+  <div id="composer">
+    <input type="file" id="fileInput" accept=".png,.jpg,.jpeg,.pdf" style="display:none" />
+    <button id="attachbtn" title="Attach an image or PDF" aria-label="Attach a file">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+    </button>
+    <textarea id="input" rows="1" placeholder="Message Kavach…"></textarea>
+    <button id="send" title="Send" aria-label="Send message">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+    </button>
+  </div>
+</div>
+
+<script>
+const API = "";   // same-origin; FastAPI serves /chat etc.
+const $ = (id) => document.getElementById(id);
+
+const ICON_X = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+const ICON_PAPERCLIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+const ICON_FILE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
+
+const state = { history: [], steps: [], deliverables: [], attached: null };
+
+// ---------- composer: auto-grow textarea ----------
+$("input").addEventListener("input", function(){
+  this.style.height = "auto";
+  this.style.height = Math.min(this.scrollHeight, 160) + "px";
+});
+
+// ---------- file attach / upload ----------
+$("attachbtn").onclick = () => $("fileInput").click();
+$("fileInput").addEventListener("change", async () => {
+  const f = $("fileInput").files[0];
+  if(!f) return;
+  $("status").textContent = "Uploading " + f.name + "…";
+  try {
+    const form = new FormData();
+    form.append("file", f);
+    const r = await fetch(`${API}/upload`, { method:"POST", body: form });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || r.statusText);
+    state.attached = d; // {path, filename, size}
+    renderAttach();
+  } catch(e){
+    alert("Upload failed: " + e.message);
+  } finally {
+    $("status").textContent = "";
+    $("fileInput").value = "";
+  }
+});
+function renderAttach(){
+  const bar = $("attachbar");
+  if(!state.attached){ bar.classList.remove("active"); return; }
+  bar.classList.add("active");
+  const chip = $("attach-chip");
+  chip.innerHTML = `${ICON_PAPERCLIP}<span>${escapeHtml(state.attached.filename)}</span><span class="x" id="attach-remove">${ICON_X}</span>`;
+  $("attach-remove").onclick = () => { state.attached = null; renderAttach(); };
+}
+
+// ---------- tabs ----------
+$("tab-chat").onclick = () => setTab("chat");
+$("tab-steps").onclick = () => setTab("steps");
+function setTab(which){
+  $("chat").classList.toggle("active", which==="chat");
+  $("steps").classList.toggle("active", which==="steps");
+  $("tab-chat").classList.toggle("active", which==="chat");
+  $("tab-steps").classList.toggle("active", which==="steps");
+}
+
+// ---------- render helpers ----------
+function addMsg(role, text, isError){
+  $("chat").querySelector(".empty")?.remove();
+  const wrap = document.createElement("div");
+  wrap.className = `msg ${role}` + (isError ? " error" : "");
+  const who = document.createElement("div"); who.className="who"; who.textContent = role==="user"?"You":"Kavach";
+  const bubble = document.createElement("div"); bubble.className="bubble"; bubble.textContent = text;
+  wrap.append(who, bubble);
+  $("chat").appendChild(wrap);
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+function renderSteps(){
+  const box = $("steps");
+  box.innerHTML = "";
+  if(!state.steps.length){
+    const empty = document.createElement("div");
+    empty.className = "empty"; empty.textContent = "No agent steps yet. Run a task to see the plan, action, and observation trace.";
+    box.appendChild(empty);
+    return;
+  }
+  state.steps.forEach(s => {
+    const el = document.createElement("div");
+    el.className = `step-line ${s.kind}`;
+    const lbl = document.createElement("div"); lbl.className="lbl";
+    lbl.textContent = s.kind.toUpperCase() + (s.tool?` · ${s.tool}`:"");
+    const pre = document.createElement("pre"); pre.textContent = s.content;
+    el.append(lbl, pre);
+    box.appendChild(el);
+  });
+  box.scrollTop = box.scrollHeight;
+}
+function addHistory(q){
+  const item = document.createElement("div");
+  item.className = "hist-item";
+  const qEl = document.createElement("div"); qEl.className = "q"; qEl.textContent = q.slice(0, 80);
+  const small = document.createElement("small"); small.textContent = "just now";
+  item.append(qEl, small);
+  $("hist-list").prepend(item);
+}
+function addDeliverable(item){
+  $("preview-body").querySelector(".empty")?.remove();
+  const div = document.createElement("div");
+  div.className = "dlv-item";
+  div.innerHTML = `${ICON_FILE}<a href="${item.url}" target="_blank"><div class="name">${escapeHtml(item.title)}</div><small>${escapeHtml(item.kind)}</small></a>`;
+  $("preview-body").prepend(div);
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+// ---------- send ----------
+async function send(){
+  const input = $("input");
+  let text = input.value.trim();
+  const attached = state.attached;
+  if(!text && !attached) return;
+  if(attached){
+    text = `File: ${attached.path}\n${text || "Read this file and tell me what it says."}`;
+  }
+  input.value = ""; input.style.height = "auto";
+  addMsg("user", text); addHistory(text);
+  state.attached = null; renderAttach();
+  $("status").textContent = "Running agent loop…";
+  $("send").disabled = true;
+  try {
+    const r = await fetch(`${API}/chat`, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ message: text, has_upload: !!attached })
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || r.statusText);
+    addMsg("assistant", d.answer);
+    state.steps = d.steps || [];
+    renderSteps();
+    // detect generated deliverable paths to surface in the right pane.
+    // the observation for a tool call is always the very next step after
+    // its action (see backend/agent/loop.py).
+    const steps = d.steps || [];
+    steps.forEach((s, i) => {
+      if(s.kind === "action" && s.tool === "generate_deliverable"){
+        const obs = steps[i + 1];
+        if(obs && obs.kind === "observation" && obs.content.includes("generated deliverable")){
+          const fullPath = obs.content.replace(/^.*-> /,"").trim();
+          const filename = fullPath.split("/").pop();
+          addDeliverable({title:filename, path:fullPath, url:`/deliverables/${filename}`, kind:"file"});
+        }
+      }
+    });
+  } catch(e){
+    addMsg("assistant", "Error: " + e.message, true);
+  } finally {
+    $("status").textContent = "";
+    $("send").disabled = false;
+  }
+}
+$("send").onclick = send;
+$("input").addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); }});
+</script>
+</body>
+</html>

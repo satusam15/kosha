@@ -1,0 +1,40 @@
+# Containerizes the sandbox executor (and, optionally, the whole backend).
+#
+# The executor runs generated user code in its OWN container with
+# --network none, so the host doesn't need to invoke `docker run` directly
+# from the app. See backend/sandbox/executor.py for the CLI it exposes.
+#
+# Usage:
+#   docker compose build sandbox
+#   docker compose up sandbox          # run the executor service
+#   (set SANDBOX_MODE=docker in the backend to call it)
+
+services:
+  # --- isolated code-execution worker (network: none enforced in code too) ---
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: mrpl-sandbox:local
+    # The executor uses `docker run --network none` internally; if you run it
+    # as a sibling container it needs the docker socket mounted (dev only).
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # TODO: dev-only; tighten for prod
+    network_mode: "none"   # the worker itself is also offline
+    environment:
+      SANDBOX_IMAGE: python:3.11-slim
+    restart: unless-stopped
+
+  # --- optional: the whole backend as a container (bind to 127.0.0.1) ---
+  # backend:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "127.0.0.1:8000:8000"
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./backend/workspace:/app/backend/workspace
+  #   environment:
+  #     MRPL_HOST: 0.0.0.0
+  #   network_mode: "host"   # so it can reach Ollama on the host's :11434

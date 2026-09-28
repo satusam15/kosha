@@ -1,0 +1,7 @@
+sih1/
+__pycache__/
+*.pyc
+data/rag_index/
+backend/workspace/uploads/
+backend/workspace/deliverables/
+.DS_Store

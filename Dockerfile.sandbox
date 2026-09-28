@@ -1,0 +1,15 @@
+# Image that actually executes generated code.
+# `backend/sandbox/executor.py` runs THIS image via:
+#   docker run --rm --network none --memory=512m mrpl-sandbox:local python -c <code>
+FROM python:3.11-slim
+
+# Hard-disable any networking that a future process might try to enable.
+# (The executor also passes --network none, this is belt-and-braces.)
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /sandbox
+
+# A tiny helper so generated code has predictable working dir + guards.
+COPY sandbox_stub.py /sandbox/stub.py
+ENTRYPOINT ["python", "-c"]

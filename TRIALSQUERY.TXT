@@ -1,0 +1,17 @@
+source sih1/bin/activate
+uvicorn backend.main:app --reload --reload-dir backend --reload-dir frontend
+
+#APPROCAL note
+Analyze this inspection report against our SOPs and generate an approval note with your risk assessment and recommendation.
+
+Generate a calc_sheet deliverable. Title: Pump P-204 Pressure Margin. Currency USD. Tax rate 0. One row: item is Discharge pressure margin over SOP threshold, qty 145, unit_price 1, formula =B2-120, note is psi over the 120 psi threshold.
+
+Generate a presentation deliverable. Title: Pump P-204 Inspection Summary. Subtitle: Discharge Pressure Exceedance. 3 slides, layout bullets: slide 1 title Findings, slide 2 title Risk Assessment, slide 3 title Recommendation.
+
+
+Write a Python function that classifies pump risk given discharge_psi and has_corrosion, using the 80-120/120-150/150+ thresholds and the one-level corrosion escalation rule. Run it in the sandbox on a few test values and show me the output.
+
+qwen2.5:3b-instruct-q4_K_M (reasoning), qwen2.5-coder:1.5b (code), moondream:latest
+
+
+http://127.0.0.1:8000/
