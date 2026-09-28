@@ -1,4 +1,4 @@
-"""Smoke tests for the mrpl-workbench backend.
+"""Smoke tests for the Kosh backend.
 
 Run from the project root with:  python -m pytest tests/ -q
 (or: python tests/test_core.py)
@@ -52,7 +52,7 @@ def test_routes_general():
 # ---------------------------------------------------------------------------
 def test_tools_registered():
     assert set(TOOLS) == {
-        "read_file", "write_file", "search_docs", "run_code",
+        "read_file", "write_file", "ocr_image", "search_docs", "run_code",
         "generate_deliverable",
     }
     assert "generate_deliverable" in describe_tools()

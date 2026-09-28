@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Kavach</title>
+<title>Kosh</title>
 <style>
   :root{
     --bg:#f7f6f1; --surface:#ffffff; --surface-alt:#f0efe7;
@@ -102,6 +102,7 @@
     color:var(--text-faint); padding:16px 16px 10px; margin:0;
   }
   #preview-body{flex:1; overflow-y:auto; padding:0 12px 16px}
+  #approvals-body{padding:0 12px 14px}
   .dlv-item{
     display:flex; align-items:flex-start; gap:9px;
     border-radius:var(--radius); padding:9px 8px; margin-bottom:2px;
@@ -111,6 +112,27 @@
   .dlv-item a{color:inherit; text-decoration:none}
   .dlv-item a:hover .name{text-decoration:underline}
   .dlv-item small{display:block; color:var(--text-faint); margin-top:2px; font-size:11px}
+
+  #approvals-section{border-bottom:1px solid var(--border)}
+  .appr-item{
+    border-radius:var(--radius); padding:9px 8px; margin-bottom:2px;
+    background:var(--accent-soft);
+  }
+  .appr-item .tool{font-size:12.5px; font-weight:600; color:var(--text)}
+  .appr-item .args{
+    font-size:11px; color:var(--text-muted); font-family:var(--font-mono);
+    margin:4px 0 8px; word-break:break-word; white-space:pre-wrap;
+  }
+  .appr-item .btns{display:flex; gap:6px}
+  .appr-item button{
+    flex:1; font-size:12px; font-family:inherit; border-radius:6px; padding:5px 0;
+    cursor:pointer; border:1px solid var(--border-strong);
+  }
+  .appr-item .approve-btn{background:var(--accent); color:var(--accent-fg); border-color:var(--accent)}
+  .appr-item .approve-btn:hover{opacity:.9}
+  .appr-item .reject-btn{background:transparent; color:var(--text-muted)}
+  .appr-item .reject-btn:hover{color:var(--text); border-color:var(--text-muted)}
+  .appr-item button:disabled{opacity:.5; cursor:not-allowed}
 
   .empty{color:var(--text-faint); font-size:13px; padding-top:4px}
 
@@ -168,7 +190,7 @@
 <header>
   <span class="brand">
     <svg class="logo" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 L4 5.2 V11 C4 16.4 7.4 20.9 12 22.5 C16.6 20.9 20 16.4 20 11 V5.2 Z"/></svg>
-    Kavach
+    Kosh
   </span>
 </header>
 
@@ -190,6 +212,12 @@
   </main>
 
   <aside id="preview">
+    <div id="approvals-section">
+      <h2>Pending Approval</h2>
+      <div id="approvals-body">
+        <div class="empty">Nothing waiting on approval.</div>
+      </div>
+    </div>
     <h2>Deliverables</h2>
     <div id="preview-body">
       <div class="empty">Generated files will appear here.</div>
@@ -207,7 +235,7 @@
     <button id="attachbtn" title="Attach an image or PDF" aria-label="Attach a file">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
     </button>
-    <textarea id="input" rows="1" placeholder="Message Kavach…"></textarea>
+    <textarea id="input" rows="1" placeholder="Message Kosh…"></textarea>
     <button id="send" title="Send" aria-label="Send message">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
     </button>
@@ -260,6 +288,60 @@ function renderAttach(){
   $("attach-remove").onclick = () => { state.attached = null; renderAttach(); };
 }
 
+// ---------- approvals (checkpoint 5: human-in-the-loop for side effects) ----------
+async function refreshApprovals(){
+  try {
+    const r = await fetch(`${API}/approvals?status=pending`);
+    const d = await r.json();
+    renderApprovals(d.approvals || []);
+  } catch { /* leave the last known list showing rather than flash empty */ }
+}
+function renderApprovals(list){
+  const box = $("approvals-body");
+  box.innerHTML = "";
+  if(!list.length){
+    box.innerHTML = '<div class="empty">Nothing waiting on approval.</div>';
+    return;
+  }
+  list.forEach(a => {
+    const div = document.createElement("div");
+    div.className = "appr-item";
+    div.innerHTML =
+      `<div class="tool">${escapeHtml(a.tool)}</div>` +
+      `<div class="args">${escapeHtml(a.args_json)}</div>` +
+      `<div class="btns">` +
+        `<button class="approve-btn" data-id="${a.id}" data-action="approve">Approve</button>` +
+        `<button class="reject-btn" data-id="${a.id}" data-action="reject">Reject</button>` +
+      `</div>`;
+    box.appendChild(div);
+  });
+  box.querySelectorAll("button[data-action]").forEach(btn => {
+    btn.onclick = () => decideApproval(btn.dataset.id, btn.dataset.action);
+  });
+}
+async function decideApproval(id, action){
+  const buttons = document.querySelectorAll(`button[data-id="${id}"]`);
+  buttons.forEach(b => b.disabled = true);
+  try {
+    const r = await fetch(`${API}/approvals/${id}/${action}`, { method: "POST" });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || r.statusText);
+    // A generate_deliverable approval that just actually ran produces the
+    // same "[ok] generated deliverable -> <path>" text the normal flow
+    // does -- surface it in the Deliverables panel the same way.
+    if(action === "approve" && d.result && d.result.includes("generated deliverable")){
+      const fullPath = d.result.replace(/^.*-> /,"").trim();
+      const filename = fullPath.split("/").pop();
+      addDeliverable({title:filename, path:fullPath, url:`/deliverables/${filename}`, kind:"file"});
+    }
+  } catch(e){
+    alert("Could not " + action + " that action: " + e.message);
+  } finally {
+    refreshApprovals();
+  }
+}
+setInterval(refreshApprovals, 5000); refreshApprovals();
+
 // ---------- tabs ----------
 $("tab-chat").onclick = () => setTab("chat");
 $("tab-steps").onclick = () => setTab("steps");
@@ -275,7 +357,7 @@ function addMsg(role, text, isError){
   $("chat").querySelector(".empty")?.remove();
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}` + (isError ? " error" : "");
-  const who = document.createElement("div"); who.className="who"; who.textContent = role==="user"?"You":"Kavach";
+  const who = document.createElement("div"); who.className="who"; who.textContent = role==="user"?"You":"Kosh";
   const bubble = document.createElement("div"); bubble.className="bubble"; bubble.textContent = text;
   wrap.append(who, bubble);
   $("chat").appendChild(wrap);
@@ -357,6 +439,7 @@ async function send(){
         }
       }
     });
+    refreshApprovals();
   } catch(e){
     addMsg("assistant", "Error: " + e.message, true);
   } finally {

@@ -34,7 +34,7 @@ from backend.agent.tools import describe_tools, run_tool, SIDE_EFFECT_TOOLS
 # Configuration
 # ---------------------------------------------------------------------------
 MAX_ITERATIONS = 8          # hard cap on tool calls per request
-SYSTEM_PREAMBLE = """You are mrpl-workbench, a local, offline-first agentic assistant.
+SYSTEM_PREAMBLE = """You are Kosh, a local, offline-first agentic assistant.
 
 You have access to these tools:
 {tools}
@@ -311,7 +311,6 @@ def run_agent(
     messages.append({"role": "user", "content": user_message})
 
     last_action_signature: Optional[str] = None
-    repeat_count = 0
 
     for iteration in range(max_iterations):
         result.iterations = iteration + 1
@@ -344,32 +343,53 @@ def run_agent(
         _record_step(result, "observation", observation[:2000])
 
         # Greedy decoding is deterministic: if the exact same call is retried
-        # after failing, it will just fail identically forever. Detect that
-        # and force a course change instead of burning the rest of the loop.
+        # after failing, it will just fail identically forever. A text nudge
+        # alone isn't reliable -- verified live that this model sometimes
+        # ignores it and repeats the identical call for every remaining
+        # iteration. So on the first repeat, stop dispatching tools entirely
+        # and force a plain-text final answer from whatever's been gathered.
         signature = f"{tool_name}:{args_json}"
-        repeat_count = repeat_count + 1 if signature == last_action_signature else 0
+        is_repeat = signature == last_action_signature
         last_action_signature = signature
 
-        nudge = ""
-        if repeat_count >= 1:
-            nudge = (
-                "\n\nYou already called this exact tool with these exact "
-                "arguments and it failed. Repeating it will fail the same "
-                "way again. Do NOT call it again — either try a different "
-                "tool/approach, or if you already have enough information, "
-                "give your final answer or call generate_deliverable now."
+        messages.append({"role": "assistant", "content": plan[:2000]})
+
+        if is_repeat:
+            messages.append({
+                "role": "user",
+                "content": f"OBSERVATION:\n{observation}\n\n"
+                           "STOP. You just repeated the exact same tool call "
+                           "with the exact same arguments -- it will fail the "
+                           "same way again. Do not call any tool again. Using "
+                           "ONLY the information already gathered above, give "
+                           "your best final answer right now as a plain "
+                           "paragraph. Do not emit an ACTION block.",
+            })
+            final_text = ""
+            for chunk in stream_chat(route.model, messages):
+                final_text += chunk
+            final_text = final_text.strip()
+            # This call must always end the task, even if the model ignores
+            # the instruction and emits another ACTION block anyway -- strip
+            # it so no half-formed action can leak into the loop or the
+            # user-facing answer.
+            stripped = _ACTION_RE.sub("", final_text).strip()
+            final_text = stripped or final_text or (
+                "[stopped] repeated the same tool call twice and produced no "
+                "usable final answer."
             )
+            _record_step(result, "final", final_text)
+            result.answer = final_text
+            _save_task_memory(result, user_message)
+            return result
 
         # Feed the observation back into the conversation and loop again.
-        messages.append(
-            {"role": "assistant", "content": plan[:2000]}
-        )
         messages.append(
             {
                 "role": "user",
                 "content": f"OBSERVATION:\n{observation}\n\n"
                            "Continue. If you are done, give your final answer. "
-                           f"Otherwise emit your next ACTION block.{nudge}",
+                           "Otherwise emit your next ACTION block.",
             }
         )
 

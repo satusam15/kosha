@@ -1,4 +1,4 @@
-"""mrpl-workbench backend package.
+"""Kosh backend package.
 
 A local, offline-first agentic AI assistant.
 Everything here talks only to `localhost` endpoints (Ollama at :11434).

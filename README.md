@@ -1,4 +1,4 @@
-# mrpl-workbench
+# Kosh
 
 A **local, offline-first agentic AI assistant**. It reads local documents,
 answers questions with a ReAct-style agent loop, runs generated code in an

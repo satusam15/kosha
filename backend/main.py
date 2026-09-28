@@ -1,4 +1,4 @@
-"""FastAPI app tying the Kavach backend together.
+"""FastAPI app tying the Kosh backend together.
 
 All model calls go to local Ollama at `http://localhost:11434`; all docs
 come from the local RAG index; code runs in the local Docker sandbox. No
@@ -37,7 +37,7 @@ from backend.agent.loop import run_agent
 from backend.router.model_router import OLLAMA_BASE_URL, REASONING_MODEL
 from backend import network_monitor
 
-app = FastAPI(title="Kavach", version="0.1.0")
+app = FastAPI(title="Kosh", version="0.1.0")
 
 # Allow the (any-origin, local) frontend to talk to this API. Still offline.
 app.add_middleware(

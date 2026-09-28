@@ -1,4 +1,4 @@
-# mrpl-workbench — local, offline-first stack
+# Kosh — local, offline-first stack
 # Install with:  pip install -r requirements.txt
 # (For a fully air-gapped box, mirror these wheels ahead of time.)
 
